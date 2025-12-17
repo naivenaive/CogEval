@@ -87,6 +87,10 @@ This repository implements a cognitive function evaluation agent built with Lang
    ```bash
    pip install -r requirements.txt
    ```
+2. **Configure LLM credentials**:
+   - Copy `.env.example` to `.env` and set `COGEVAL_OPENAI_API_KEY` (or standard `OPENAI_API_KEY`).
+   - The router will automatically use the real OpenAI Chat model via LangChain when the key is present; otherwise it falls back to the deterministic mock client so tests keep passing.
+   - You can also set per-provider models via `COGEVAL_MODEL_OPENAI`, `COGEVAL_MODEL_DEEPSEEK`, or `COGEVAL_MODEL_WANAI`.
 2. **Run unit tests**:
    ```bash
    pytest

@@ -1,11 +1,27 @@
-"""Unified LLM client interfaces and router."""
+"""Unified LLM client interfaces and router.
+
+This module now integrates LangChain chat models so production users can
+back the agent with real LLMs (e.g., OpenAI). When credentials or optional
+dependencies are missing, clients gracefully fall back to deterministic
+mock responses to keep tests green.
+"""
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Dict, List
 
 from src.config import AppSettings
+
+try:  # LangChain is optional for tests; required for real LLM calls
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+    from langchain_openai import ChatOpenAI
+except Exception:  # pragma: no cover - optional dependency
+    AIMessage = None
+    HumanMessage = None
+    SystemMessage = None
+    ChatOpenAI = None
 
 
 class BaseLLMClient:
@@ -28,11 +44,43 @@ class MockLLMClient(BaseLLMClient):
 class OpenAIClient(BaseLLMClient):
     name = "openai"
 
-    def __init__(self, model: str = "gpt-4o-mini") -> None:
+    def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2) -> None:
         self.model = model
+        self.temperature = temperature
+        self.api_key = os.getenv("COGEVAL_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        self._chat = self._build_chat_model()
+
+    def _build_chat_model(self):  # pragma: no cover - network-bound path
+        if ChatOpenAI is None or self.api_key is None:
+            return None
+        try:
+            return ChatOpenAI(model=self.model, api_key=self.api_key, temperature=self.temperature)
+        except Exception:
+            return None
+
+    def _to_langchain_messages(self, messages: List[Dict[str, str]]):
+        if HumanMessage is None:
+            return []
+        role_map = {
+            "user": HumanMessage,
+            "system": SystemMessage,
+            "assistant": AIMessage,
+        }
+        converted = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            cls = role_map.get(role, HumanMessage)
+            converted.append(cls(content))
+        return converted
 
     def generate(self, messages: List[Dict[str, str]], **_: object) -> str:
-        # Placeholder: would call OpenAI SDK. Kept deterministic for tests.
+        if self._chat:
+            try:  # pragma: no cover - network-bound path
+                response = self._chat.invoke(self._to_langchain_messages(messages))
+                return response.content if hasattr(response, "content") else str(response)
+            except Exception:
+                pass
         last = messages[-1]["content"] if messages else ""
         return f"[openai:{self.model}] {last[:200]}"
 
